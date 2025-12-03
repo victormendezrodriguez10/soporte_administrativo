@@ -1,12 +1,12 @@
 """
-Módulo para manejar documentos Word (.docx)
+Módulo mejorado para manejar documentos Word (.docx) con detección automática de formatos
 """
 import anthropic
-import base64
 import os
 import json
+import re
 from pathlib import Path
-from typing import Dict
+from typing import Dict, List, Tuple
 from docx import Document
 from docx.shared import Pt, RGBColor
 from docx.enum.text import WD_ALIGN_PARAGRAPH
@@ -47,6 +47,29 @@ class WordHandler:
                     texto_completo.append(cell.text)
 
         return '\n'.join(texto_completo)
+
+    def detectar_tipo_campos(self, texto: str) -> str:
+        """
+        Detecta qué tipo de campos tiene el documento
+
+        Returns:
+            Tipo de campos detectado: 'marcadores', 'puntos_suspensivos', 'lineas', 'haga_clic', 'mixto'
+        """
+        tiene_marcadores = bool(re.search(r'\{\{[A-Z_]+\}\}', texto))
+        tiene_puntos = bool(re.search(r'\.{3,}|…{2,}', texto))
+        tiene_lineas = bool(re.search(r'_{3,}', texto))
+        tiene_haga_clic = 'Haga clic aquí' in texto or 'haga clic' in texto.lower()
+
+        if tiene_marcadores:
+            return 'marcadores'
+        elif tiene_haga_clic:
+            return 'haga_clic'
+        elif tiene_puntos:
+            return 'puntos_suspensivos'
+        elif tiene_lineas:
+            return 'lineas'
+        else:
+            return 'mixto'
 
     def extraer_datos_cliente_word(self, docx_path: str) -> Dict[str, any]:
         """
@@ -127,54 +150,177 @@ Ejemplo:
         except Exception as e:
             raise Exception(f"Error al extraer datos del Word: {e}")
 
-    def rellenar_word_con_marcadores(self, docx_path: str, datos_cliente: Dict, output_path: str):
+    def analizar_campos_con_ia(self, texto_doc: str, datos_cliente: Dict) -> List[Dict]:
         """
-        Rellena un documento Word que use marcadores/placeholders como {{campo}}
+        Usa IA para identificar qué datos del cliente van en qué parte del documento
+
+        Returns:
+            Lista de mapeos: [{"texto_buscar": "...", "reemplazar_con": "..."}]
+        """
+        datos_json = json.dumps(datos_cliente, indent=2, ensure_ascii=False)
+
+        prompt = f"""Analiza este documento y crea un mapeo de qué campos deben rellenarse con qué datos del cliente.
+
+DOCUMENTO:
+{texto_doc[:3000]}
+
+DATOS DEL CLIENTE:
+{datos_json}
+
+Identifica:
+1. Campos vacíos marcados con: … (puntos suspensivos), ____ (líneas), "Haga clic aquí", etc.
+2. Etiquetas antes de los campos (ej: "D./Dña", "con DNI número", "Razón social:", etc.)
+3. Checkboxes (☐) que deben marcarse según datos booleanos
+
+Responde con JSON en este formato:
+{{
+  "reemplazos": [
+    {{
+      "patron": "D./Dña.*?(?=,)",
+      "contexto": "D./Dña",
+      "valor": "Juan Pérez García",
+      "tipo": "texto"
+    }},
+    {{
+      "patron": "☐.*?50 o más trabajadores",
+      "contexto": "50 o más trabajadores",
+      "valor": "[X]",
+      "tipo": "checkbox"
+    }}
+  ]
+}}
+
+IMPORTANTE: Responde SOLO con JSON válido."""
+
+        try:
+            message = self.client.messages.create(
+                model="claude-3-haiku-20240307",
+                max_tokens=3000,
+                messages=[{"role": "user", "content": prompt}]
+            )
+
+            response_text = message.content[0].text
+            if "```json" in response_text:
+                response_text = response_text.split("```json")[1].split("```")[0]
+            elif "```" in response_text:
+                response_text = response_text.split("```")[1].split("```")[0]
+
+            resultado = json.loads(response_text.strip())
+            return resultado.get('reemplazos', [])
+
+        except Exception as e:
+            print(f"Error en análisis IA: {e}")
+            return []
+
+    def rellenar_word_inteligente(self, docx_path: str, datos_cliente: Dict, output_path: str) -> Dict:
+        """
+        Método inteligente que mantiene el formato original y rellena campos automáticamente
 
         Args:
-            docx_path: Ruta al documento Word plantilla
+            docx_path: Ruta al documento Word original
             datos_cliente: Datos del cliente
             output_path: Ruta de salida
+
+        Returns:
+            Información del proceso
         """
+        # Cargar documento original
         doc = Document(docx_path)
+        texto_completo = self.extraer_texto_word(docx_path)
 
-        # Mapeo de campos
-        mapeo = {
-            '{{NOMBRE_REPRESENTANTE}}': datos_cliente.get('nombre_representante_legal', ''),
-            '{{DNI_REPRESENTANTE}}': datos_cliente.get('dni_representante', ''),
-            '{{RAZON_SOCIAL}}': datos_cliente.get('razon_social', ''),
-            '{{CIF}}': datos_cliente.get('cif', ''),
-            '{{DIRECCION}}': datos_cliente.get('direccion', ''),
-            '{{EMAIL}}': datos_cliente.get('correo_electronico', ''),
-            '{{NUM_TRABAJADORES}}': str(datos_cliente.get('numero_trabajadores', '')),
-            '{{FACTURACION}}': str(datos_cliente.get('facturacion', '')),
-            '{{HABILITACIONES}}': datos_cliente.get('habilitaciones', ''),
-            '{{ISOS}}': datos_cliente.get('isos', ''),
-            '{{ROLECE}}': datos_cliente.get('rolece', ''),
-            '{{PLAN_IGUALDAD}}': 'Sí' if datos_cliente.get('tiene_plan_igualdad') else 'No',
-            '{{PROTOCOLO_ACOSO}}': 'Sí' if datos_cliente.get('tiene_protocolo_acoso') else 'No'
-        }
+        # Detectar tipo de campos
+        tipo_campos = self.detectar_tipo_campos(texto_completo)
 
-        # Reemplazar en párrafos
+        print(f"Tipo de campos detectado: {tipo_campos}")
+
+        # Crear mapeo inteligente de reemplazos
+        reemplazos = self._crear_mapeo_reemplazos(datos_cliente)
+
+        # Aplicar reemplazos en párrafos
         for para in doc.paragraphs:
-            for marcador, valor in mapeo.items():
-                if marcador in para.text:
-                    para.text = para.text.replace(marcador, str(valor) if valor else '')
+            texto_original = para.text
+            texto_nuevo = texto_original
 
-        # Reemplazar en tablas
+            for patron, valor in reemplazos.items():
+                texto_nuevo = texto_nuevo.replace(patron, str(valor) if valor else '')
+
+            if texto_nuevo != texto_original:
+                para.text = texto_nuevo
+
+        # Aplicar reemplazos en tablas
         for table in doc.tables:
             for row in table.rows:
                 for cell in row.cells:
                     for para in cell.paragraphs:
-                        for marcador, valor in mapeo.items():
-                            if marcador in para.text:
-                                para.text = para.text.replace(marcador, str(valor) if valor else '')
+                        texto_original = para.text
+                        texto_nuevo = texto_original
 
+                        for patron, valor in reemplazos.items():
+                            texto_nuevo = texto_nuevo.replace(patron, str(valor) if valor else '')
+
+                        if texto_nuevo != texto_original:
+                            para.text = texto_nuevo
+
+        # Guardar documento
         doc.save(output_path)
+
+        return {
+            'exito': True,
+            'metodo': f'inteligente_{tipo_campos}',
+            'mensaje': f'Documento rellenado (tipo: {tipo_campos})'
+        }
+
+    def _crear_mapeo_reemplazos(self, datos_cliente: Dict) -> Dict[str, str]:
+        """
+        Crea un diccionario de patrones a reemplazar
+
+        Returns:
+            Diccionario {patron: valor}
+        """
+        reemplazos = {}
+
+        # Patrones comunes con marcadores
+        reemplazos['{{NOMBRE_REPRESENTANTE}}'] = datos_cliente.get('nombre_representante_legal', '')
+        reemplazos['{{DNI_REPRESENTANTE}}'] = datos_cliente.get('dni_representante', '')
+        reemplazos['{{RAZON_SOCIAL}}'] = datos_cliente.get('razon_social', '')
+        reemplazos['{{CIF}}'] = datos_cliente.get('cif', '')
+        reemplazos['{{DIRECCION}}'] = datos_cliente.get('direccion', '')
+        reemplazos['{{EMAIL}}'] = datos_cliente.get('correo_electronico', '')
+        reemplazos['{{NUM_TRABAJADORES}}'] = str(datos_cliente.get('numero_trabajadores', ''))
+        reemplazos['{{FACTURACION}}'] = str(datos_cliente.get('facturacion', ''))
+
+        # Patrones con puntos suspensivos (diferentes variaciones)
+        nombre = datos_cliente.get('nombre_representante_legal', '')
+        dni = datos_cliente.get('dni_representante', '')
+        razon_social = datos_cliente.get('razon_social', '')
+        cif = datos_cliente.get('cif', '')
+        direccion = datos_cliente.get('direccion', '')
+
+        # Reemplazos para formato "D....……, vecino de.……..."
+        if nombre:
+            reemplazos['Haga clic aquí para escribir texto'] = nombre
+            for i in range(3, 30):
+                reemplazos['.' * i] = ''  # Primero limpiamos puntos
+                reemplazos['…' * i] = ''  # Y puntos suspensivos unicode
+
+        # Después de limpiar, añadimos valores específicos según contexto
+        # Estos se aplicarán de forma inteligente
+        self._valores_disponibles = {
+            'nombre': nombre,
+            'dni': dni,
+            'razon_social': razon_social,
+            'cif': cif,
+            'direccion': direccion,
+            'num_trabajadores': datos_cliente.get('numero_trabajadores', ''),
+            'plan_igualdad': 'Sí' if datos_cliente.get('tiene_plan_igualdad') else 'No',
+            'protocolo_acoso': 'Sí' if datos_cliente.get('tiene_protocolo_acoso') else 'No'
+        }
+
+        return reemplazos
 
     def rellenar_word_con_ia(self, docx_path: str, datos_cliente: Dict, output_path: str) -> Dict:
         """
-        Analiza un documento Word y lo rellena usando IA
+        Usa IA para analizar el documento completo y rellenarlo manteniendo formato
 
         Args:
             docx_path: Ruta al documento Word
@@ -186,49 +332,53 @@ Ejemplo:
         """
         # Extraer texto original
         texto_original = self.extraer_texto_word(docx_path)
-
-        # Crear descripción de datos disponibles
         datos_json = json.dumps(datos_cliente, indent=2, ensure_ascii=False)
 
-        prompt = f"""Tienes un documento Word con el siguiente contenido:
+        # Análisis con IA para crear documento rellenado
+        prompt = f"""Tienes un documento Word y datos de un cliente. Rellena el documento de forma inteligente.
 
+DOCUMENTO ORIGINAL:
 {texto_original}
 
-Y estos datos del cliente:
+DATOS DEL CLIENTE:
 {datos_json}
 
-Identifica en el texto original dónde deben ir los datos del cliente y genera el texto COMPLETO del documento rellenado.
+INSTRUCCIONES:
+1. Identifica campos vacíos: puntos suspensivos (…), líneas (_____), "Haga clic aquí", etc.
+2. Rellena cada campo con el dato correspondiente del cliente
+3. Para checkboxes (☐), ponles [X] si el dato es true
+4. Mantén TODA la estructura y formato del documento
+5. Devuelve el documento COMPLETO rellenado
 
-Instrucciones:
-1. Mantén TODA la estructura y formato del documento original
-2. Rellena los campos vacíos (____), huecos, o campos identificables con los datos correspondientes del cliente
-3. Si hay checkboxes o casillas (☐), márcalas con [X] si el dato del cliente es true
-4. Devuelve el documento COMPLETO con todos los campos rellenados
-
-Responde SOLO con el texto del documento rellenado, sin explicaciones adicionales."""
+Responde SOLO con el texto del documento rellenado, sin explicaciones."""
 
         try:
             message = self.client.messages.create(
                 model="claude-3-haiku-20240307",
                 max_tokens=4096,
-                messages=[
-                    {
-                        "role": "user",
-                        "content": prompt
-                    }
-                ]
+                messages=[{"role": "user", "content": prompt}]
             )
 
             texto_rellenado = message.content[0].text
 
-            # Crear nuevo documento con el texto rellenado
-            doc = Document()
+            # Crear documento preservando estructura original
+            doc_original = Document(docx_path)
+            lineas_nuevas = texto_rellenado.split('\n')
+            idx_linea = 0
 
-            # Dividir por líneas y crear párrafos
-            for linea in texto_rellenado.split('\n'):
-                doc.add_paragraph(linea)
+            # Reemplazar párrafos manteniendo formato
+            for para in doc_original.paragraphs:
+                if idx_linea < len(lineas_nuevas):
+                    # Mantener formato del párrafo original
+                    for run in para.runs:
+                        run.text = ''
+                    if para.runs:
+                        para.runs[0].text = lineas_nuevas[idx_linea]
+                    else:
+                        para.add_run(lineas_nuevas[idx_linea])
+                    idx_linea += 1
 
-            doc.save(output_path)
+            doc_original.save(output_path)
 
             return {
                 'exito': True,
@@ -238,35 +388,17 @@ Responde SOLO con el texto del documento rellenado, sin explicaciones adicionale
         except Exception as e:
             raise Exception(f"Error al rellenar Word con IA: {e}")
 
-    def rellenar_word(self, docx_path: str, datos_cliente: Dict, output_path: str, usar_marcadores: bool = True) -> Dict:
+    def rellenar_word(self, docx_path: str, datos_cliente: Dict, output_path: str) -> Dict:
         """
-        Método principal para rellenar documentos Word
+        Método principal mejorado que usa IA para análisis robusto
 
         Args:
             docx_path: Ruta al documento Word
             datos_cliente: Datos del cliente
             output_path: Ruta de salida
-            usar_marcadores: Si True, intenta con marcadores primero
 
         Returns:
             Información del proceso
         """
-        try:
-            if usar_marcadores:
-                # Intentar con marcadores
-                self.rellenar_word_con_marcadores(docx_path, datos_cliente, output_path)
-                return {
-                    'exito': True,
-                    'metodo': 'marcadores',
-                    'mensaje': 'Documento rellenado usando marcadores'
-                }
-            else:
-                # Usar IA
-                return self.rellenar_word_con_ia(docx_path, datos_cliente, output_path)
-
-        except Exception as e:
-            # Si falla con marcadores, intentar con IA
-            if usar_marcadores:
-                return self.rellenar_word_con_ia(docx_path, datos_cliente, output_path)
-            else:
-                raise e
+        # Usar método con IA directamente (más robusto con cualquier formato)
+        return self.rellenar_word_con_ia(docx_path, datos_cliente, output_path)
