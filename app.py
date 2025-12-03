@@ -457,13 +457,6 @@ def pagina_rellenar_documentos():
         # Opciones de rellenado
         extension = formulario.name.split('.')[-1].lower()
 
-        if extension == 'docx':
-            usar_marcadores = st.checkbox(
-                "Usar marcadores ({{CAMPO}})",
-                value=True,
-                help="Si el documento usa marcadores como {{RAZON_SOCIAL}}, déjalo marcado"
-            )
-
         if st.button("🎯 Rellenar Documento", type="primary"):
             with st.spinner("Rellenando documento..."):
                 try:
@@ -497,8 +490,7 @@ def pagina_rellenar_documentos():
                         resultado = st.session_state.word_handler.rellenar_word(
                             formulario_path,
                             datos_cliente,
-                            output_path,
-                            usar_marcadores=usar_marcadores
+                            output_path
                         )
 
                     st.success(f"✅ {resultado['mensaje']}")
