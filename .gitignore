@@ -1,0 +1,48 @@
+# Variables de entorno y secretos
+.env
+*.env
+.env.local
+
+# Streamlit secrets (CRÍTICO - NO SUBIR)
+.streamlit/secrets.toml
+
+# Entorno virtual de Python
+venv/
+env/
+ENV/
+.venv/
+
+# Archivos de Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Archivos subidos y generados
+uploaded_pdfs/*
+generated_pdfs/*
+!uploaded_pdfs/.gitkeep
+!generated_pdfs/.gitkeep
+
+# Base de datos local (si se usa SQLite)
+database/*.db
+database/*.sqlite
+database/*.sqlite3
+*.db
+*.sqlite
+*.sqlite3
+
+# Logs
+*.log
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Sistema operativo
+.DS_Store
+Thumbs.db
