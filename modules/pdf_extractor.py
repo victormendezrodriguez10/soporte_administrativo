@@ -32,12 +32,20 @@ class PDFExtractor:
         Returns:
             Diccionario con los datos extraídos del cliente
         """
-        # Leer el PDF y convertirlo a base64
-        with open(pdf_path, 'rb') as f:
-            pdf_data = base64.standard_b64encode(f.read()).decode('utf-8')
+        # Extraer texto del PDF (Haiku no soporta análisis directo de PDFs)
+        from pypdf import PdfReader
+        reader = PdfReader(pdf_path)
+        texto_pdf = ""
+        for page in reader.pages:
+            texto_pdf += page.extract_text() + "\n\n"
 
         # Definir el prompt para extraer datos
-        prompt = """Analiza este documento PDF y extrae la siguiente información sobre el cliente/empresa:
+        prompt = f"""Analiza este documento y extrae la siguiente información sobre el cliente/empresa:
+
+CONTENIDO DEL DOCUMENTO:
+{texto_pdf}
+
+EXTRAE LA SIGUIENTE INFORMACIÓN:
 
 1. nombre_representante_legal: Nombre completo del representante legal
 2. dni_representante: DNI/NIF del representante legal
@@ -78,27 +86,14 @@ Ejemplo de formato de respuesta:
 }"""
 
         try:
-            # Llamar a Claude API con el PDF
+            # Llamar a Claude API con el texto extraído
             message = self.client.messages.create(
-                model="claude-3-5-sonnet-20241022",
+                model="claude-3-haiku-20240307",
                 max_tokens=2048,
                 messages=[
                     {
                         "role": "user",
-                        "content": [
-                            {
-                                "type": "document",
-                                "source": {
-                                    "type": "base64",
-                                    "media_type": "application/pdf",
-                                    "data": pdf_data
-                                }
-                            },
-                            {
-                                "type": "text",
-                                "text": prompt
-                            }
-                        ]
+                        "content": prompt
                     }
                 ]
             )

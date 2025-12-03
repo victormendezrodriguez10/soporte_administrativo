@@ -101,7 +101,7 @@ Ejemplo:
 
         try:
             message = self.client.messages.create(
-                model="claude-3-5-sonnet-20241022",
+                model="claude-3-haiku-20240307",
                 max_tokens=2048,
                 messages=[
                     {
@@ -209,8 +209,8 @@ Responde SOLO con el texto del documento rellenado, sin explicaciones adicionale
 
         try:
             message = self.client.messages.create(
-                model="claude-3-5-sonnet-20241022",
-                max_tokens=8192,
+                model="claude-3-haiku-20240307",
+                max_tokens=4096,
                 messages=[
                     {
                         "role": "user",

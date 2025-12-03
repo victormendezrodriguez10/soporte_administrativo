@@ -37,14 +37,20 @@ class PDFFiller:
         Returns:
             Información sobre cómo rellenar el formulario
         """
-        # Leer el PDF y convertirlo a base64
-        with open(pdf_path, 'rb') as f:
-            pdf_data = base64.standard_b64encode(f.read()).decode('utf-8')
+        # Extraer texto del PDF (Haiku no soporta análisis directo de PDFs)
+        reader = PdfReader(pdf_path)
+        texto_pdf = ""
+        for page_num, page in enumerate(reader.pages):
+            texto_pdf += f"\n\n--- PÁGINA {page_num + 1} ---\n"
+            texto_pdf += page.extract_text()
 
         # Crear descripción de los datos disponibles
         datos_disponibles = json.dumps(datos_cliente, indent=2, ensure_ascii=False)
 
-        prompt = f"""Analiza este formulario PDF vacío y los datos del cliente proporcionados.
+        prompt = f"""Analiza este formulario y los datos del cliente proporcionados.
+
+CONTENIDO DEL FORMULARIO:
+{texto_pdf}
 
 DATOS DEL CLIENTE DISPONIBLES:
 {datos_disponibles}
@@ -72,7 +78,7 @@ INSTRUCCIONES:
       "etiqueta_en_pdf": "☐ Tiene plan de igualdad",
       "campo_cliente": "tiene_plan_igualdad",
       "valor": true,
-      "pagina": 2,
+      "pagina": 1,
       "zona": "media derecha",
       "tipo": "checkbox"
     }}
@@ -88,25 +94,12 @@ IMPORTANTE:
 
         try:
             message = self.client.messages.create(
-                model="claude-3-5-sonnet-20241022",
+                model="claude-3-haiku-20240307",
                 max_tokens=4096,
                 messages=[
                     {
                         "role": "user",
-                        "content": [
-                            {
-                                "type": "document",
-                                "source": {
-                                    "type": "base64",
-                                    "media_type": "application/pdf",
-                                    "data": pdf_data
-                                }
-                            },
-                            {
-                                "type": "text",
-                                "text": prompt
-                            }
-                        ]
+                        "content": prompt
                     }
                 ]
             )
@@ -140,12 +133,12 @@ IMPORTANTE:
             reader = PdfReader(pdf_path)
             writer = PdfWriter()
 
-            # Verificar si tiene campos de formulario
-            if reader.get_form_text_fields() is None:
-                return False
-
             # Obtener campos del formulario
             form_fields = reader.get_form_text_fields()
+
+            # Verificar si tiene campos de formulario
+            if form_fields is None or len(form_fields) == 0:
+                return False
 
             # Mapeo de nombres de campos comunes
             mapeo_campos = {
@@ -167,6 +160,8 @@ IMPORTANTE:
             # Rellenar campos
             for page in reader.pages:
                 writer.add_page(page)
+
+            campos_rellenados = 0
 
             # Intentar rellenar cada campo del cliente
             for campo_cliente, valor in datos_cliente.items():
@@ -191,7 +186,12 @@ IMPORTANTE:
                                     writer.pages[0],
                                     {nombre_campo_pdf: valor_str}
                                 )
+                                campos_rellenados += 1
                                 break
+
+            # Solo guardar si se rellenó al menos un campo
+            if campos_rellenados == 0:
+                return False
 
             # Guardar PDF rellenado
             with open(output_path, 'wb') as output_file:
