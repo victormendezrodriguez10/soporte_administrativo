@@ -100,19 +100,25 @@ def pagina_inicio():
     st.markdown("""
     ### Bienvenido al Sistema de Gestión de Clientes
 
-    Este sistema permite:
-    - 📥 **Extraer datos** de documentos PDF y Word usando IA
-    - 💾 **Guardar información** de clientes en base de datos
-    - 📝 **Rellenar formularios** automáticamente con datos guardados
-    - 📤 **Descargar documentos** completados
+    #### 📝 ¿Cómo funciona?
 
-    #### Campos gestionados:
-    - Nombre del representante legal y DNI
-    - Razón social y CIF
-    - Dirección y correo electrónico
-    - Número de trabajadores y facturación
-    - Habilitaciones, ISOs, ROLECE
-    - Plan de igualdad y protocolo de acoso
+    1. **👥 Gestionar Clientes**
+       - Añade clientes manualmente con todos sus datos
+       - Busca clientes por razón social o CIF
+       - Visualiza y administra tu base de datos
+
+    2. **📝 Rellenar Documentos**
+       - Busca y selecciona un cliente
+       - Sube un formulario vacío (PDF o Word)
+       - Descarga el documento completado automáticamente
+       - Los archivos se borran automáticamente del servidor
+
+    #### 💼 Campos gestionados:
+    - Datos del representante legal (nombre, DNI)
+    - Información de la empresa (razón social, CIF, dirección)
+    - Datos operacionales (trabajadores, facturación)
+    - Certificaciones (habilitaciones, ISOs, ROLECE)
+    - Políticas (plan de igualdad, protocolo de acoso)
 
     ### 🚀 Comienza seleccionando una opción del menú lateral
     """)
@@ -243,64 +249,200 @@ def pagina_gestionar_clientes():
     """Página para ver y gestionar clientes"""
     st.title("👥 Gestionar Clientes")
 
-    # Obtener todos los clientes
-    clientes = st.session_state.db_manager.obtener_todos_clientes()
+    # Tabs para Añadir y Ver clientes
+    tab1, tab2 = st.tabs(["➕ Añadir Cliente", "📋 Ver Clientes"])
 
-    if not clientes:
-        st.info("No hay clientes registrados. Ve a 'Extraer Datos' para añadir el primero.")
-        return
+    # TAB 1: Añadir Cliente
+    with tab1:
+        st.subheader("Añadir Nuevo Cliente")
 
-    # Mostrar tabla de clientes
-    st.subheader(f"Total de Clientes: {len(clientes)}")
-
-    for cliente in clientes:
-        with st.expander(f"🏢 {cliente.razon_social} - CIF: {cliente.cif}"):
+        with st.form("form_nuevo_cliente"):
+            st.markdown("### Datos del Representante Legal")
             col1, col2 = st.columns(2)
-
             with col1:
-                st.markdown("**Representante Legal**")
-                st.write(f"Nombre: {cliente.nombre_representante_legal}")
-                st.write(f"DNI: {cliente.dni_representante}")
-
-                st.markdown("**Contacto**")
-                st.write(f"Email: {cliente.correo_electronico}")
-                st.write(f"Dirección: {cliente.direccion}")
-
+                nombre_representante = st.text_input("Nombre completo*", key="nombre_rep")
             with col2:
-                st.markdown("**Datos Operacionales**")
-                st.write(f"Trabajadores: {cliente.numero_trabajadores}")
-                st.write(f"Facturación: {cliente.facturacion}")
+                dni_representante = st.text_input("DNI/NIF*", key="dni_rep")
 
-                st.markdown("**Certificaciones**")
-                st.write(f"ISOs: {cliente.isos}")
-                st.write(f"ROLECE: {cliente.rolece}")
+            st.markdown("### Datos de la Empresa")
+            col1, col2 = st.columns(2)
+            with col1:
+                razon_social = st.text_input("Razón Social*", key="razon")
+                cif = st.text_input("CIF*", key="cif")
+                direccion = st.text_area("Dirección completa*", key="dir")
+            with col2:
+                correo = st.text_input("Correo electrónico*", key="email")
+                num_trabajadores = st.number_input("Número de trabajadores", min_value=0, key="trabajadores")
+                facturacion = st.number_input("Facturación anual (€)", min_value=0.0, step=1000.0, key="factura")
 
-            # Botón para eliminar
-            if st.button(f"🗑️ Eliminar Cliente {cliente.id}", key=f"del_{cliente.id}"):
-                if st.session_state.db_manager.eliminar_cliente(cliente.id):
-                    st.success("Cliente eliminado")
-                    st.rerun()
+            st.markdown("### Certificaciones y Habilitaciones")
+            col1, col2 = st.columns(2)
+            with col1:
+                habilitaciones = st.text_area("Habilitaciones (separadas por comas)", key="habil")
+                isos = st.text_input("Certificaciones ISO (separadas por comas)", key="isos")
+            with col2:
+                rolece = st.text_input("Número ROLECE", key="rolece")
+
+            st.markdown("### Políticas y Protocolos")
+            col1, col2 = st.columns(2)
+            with col1:
+                plan_igualdad = st.checkbox("Plan de Igualdad", key="plan")
+            with col2:
+                protocolo_acoso = st.checkbox("Protocolo de Acoso", key="protocolo")
+
+            submit = st.form_submit_button("💾 Guardar Cliente", type="primary", use_container_width=True)
+
+            if submit:
+                if not all([nombre_representante, dni_representante, razon_social, cif, direccion, correo]):
+                    st.error("⚠️ Por favor, completa todos los campos obligatorios (*)")
+                else:
+                    try:
+                        datos_cliente = {
+                            'nombre_representante_legal': nombre_representante,
+                            'dni_representante': dni_representante,
+                            'razon_social': razon_social,
+                            'cif': cif,
+                            'direccion': direccion,
+                            'correo_electronico': correo,
+                            'numero_trabajadores': num_trabajadores,
+                            'facturacion': facturacion,
+                            'habilitaciones': habilitaciones if habilitaciones else None,
+                            'isos': isos if isos else None,
+                            'rolece': rolece if rolece else None,
+                            'tiene_plan_igualdad': plan_igualdad,
+                            'tiene_protocolo_acoso': protocolo_acoso
+                        }
+                        cliente = st.session_state.db_manager.agregar_cliente(datos_cliente)
+                        st.success(f"✅ Cliente '{razon_social}' guardado correctamente (ID: {cliente.id})")
+                        st.balloons()
+                    except Exception as e:
+                        st.error(f"Error al guardar cliente: {e}")
+
+    # TAB 2: Ver Clientes
+    with tab2:
+        # Obtener todos los clientes
+        clientes = st.session_state.db_manager.obtener_todos_clientes()
+
+        if not clientes:
+            st.info("📭 No hay clientes registrados. Añade el primero en la pestaña 'Añadir Cliente'.")
+            return
+
+        # Buscador
+        st.subheader(f"📊 Total de Clientes: {len(clientes)}")
+
+        col1, col2 = st.columns([3, 1])
+        with col1:
+            buscar = st.text_input("🔍 Buscar por razón social o CIF", key="buscar_cliente", placeholder="Escribe para buscar...")
+        with col2:
+            st.write("")  # Espaciado
+            st.write("")
+
+        # Filtrar clientes según búsqueda
+        if buscar:
+            clientes_filtrados = [c for c in clientes if
+                                  buscar.lower() in c.razon_social.lower() or
+                                  (c.cif and buscar.lower() in c.cif.lower())]
+            if clientes_filtrados:
+                st.info(f"🔍 {len(clientes_filtrados)} cliente(s) encontrado(s)")
+            else:
+                st.warning("No se encontraron clientes con ese criterio")
+        else:
+            clientes_filtrados = clientes
+
+        # Mostrar clientes
+        for cliente in clientes_filtrados:
+            with st.expander(f"🏢 {cliente.razon_social} - CIF: {cliente.cif}"):
+                col1, col2 = st.columns(2)
+
+                with col1:
+                    st.markdown("**Representante Legal**")
+                    st.write(f"Nombre: {cliente.nombre_representante_legal or 'N/A'}")
+                    st.write(f"DNI: {cliente.dni_representante or 'N/A'}")
+
+                    st.markdown("**Contacto**")
+                    st.write(f"Email: {cliente.correo_electronico or 'N/A'}")
+                    st.write(f"Dirección: {cliente.direccion or 'N/A'}")
+
+                with col2:
+                    st.markdown("**Datos Operacionales**")
+                    st.write(f"Trabajadores: {cliente.numero_trabajadores or 0}")
+                    st.write(f"Facturación: {cliente.facturacion or 0} €")
+
+                    st.markdown("**Certificaciones**")
+                    st.write(f"Habilitaciones: {cliente.habilitaciones or 'N/A'}")
+                    st.write(f"ISOs: {cliente.isos or 'N/A'}")
+                    st.write(f"ROLECE: {cliente.rolece or 'N/A'}")
+
+                    st.markdown("**Políticas**")
+                    st.write(f"Plan Igualdad: {'✅ Sí' if cliente.tiene_plan_igualdad else '❌ No'}")
+                    st.write(f"Protocolo Acoso: {'✅ Sí' if cliente.tiene_protocolo_acoso else '❌ No'}")
+
+                # Botón para eliminar
+                if st.button(f"🗑️ Eliminar Cliente", key=f"del_{cliente.id}"):
+                    if st.session_state.db_manager.eliminar_cliente(cliente.id):
+                        st.success("Cliente eliminado")
+                        st.rerun()
 
 def pagina_rellenar_documentos():
     """Página para rellenar documentos con datos de clientes"""
     st.title("📝 Rellenar Documentos")
-    st.markdown("Selecciona un cliente y sube un formulario para rellenarlo automáticamente")
+    st.markdown("Sube un formulario vacío y selecciona el cliente para rellenarlo automáticamente")
 
     # Obtener clientes
     clientes = st.session_state.db_manager.obtener_todos_clientes()
 
     if not clientes:
-        st.warning("No hay clientes registrados. Primero debes extraer datos de un documento.")
+        st.warning("⚠️ No hay clientes registrados. Ve a 'Gestionar Clientes' para añadir el primero.")
         return
 
-    # Seleccionar cliente
-    opciones_clientes = {f"{c.razon_social} (CIF: {c.cif})": c for c in clientes}
-    cliente_seleccionado_str = st.selectbox("Selecciona un cliente", list(opciones_clientes.keys()))
+    # PASO 1: Buscar y seleccionar cliente
+    st.subheader("1️⃣ Selecciona el Cliente")
+
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        buscar_cliente = st.text_input("🔍 Buscar por razón social o CIF", key="buscar_rellenar", placeholder="Escribe para buscar...")
+
+    # Filtrar clientes
+    if buscar_cliente:
+        clientes_filtrados = [c for c in clientes if
+                              buscar_cliente.lower() in c.razon_social.lower() or
+                              (c.cif and buscar_cliente.lower() in c.cif.lower())]
+    else:
+        clientes_filtrados = clientes
+
+    if not clientes_filtrados:
+        st.warning("No se encontraron clientes con ese criterio")
+        return
+
+    # Crear opciones para selectbox
+    opciones_clientes = {f"🏢 {c.razon_social} - CIF: {c.cif}": c for c in clientes_filtrados}
+    cliente_seleccionado_str = st.selectbox(
+        "Selecciona el cliente",
+        list(opciones_clientes.keys()),
+        key="select_cliente"
+    )
     cliente_seleccionado = opciones_clientes[cliente_seleccionado_str]
 
     # Mostrar datos del cliente
-    with st.expander("Ver datos del cliente"):
-        st.json(cliente_seleccionado.to_dict())
+    with st.expander("👁️ Ver datos del cliente seleccionado"):
+        col1, col2 = st.columns(2)
+        with col1:
+            st.markdown("**Datos Básicos**")
+            st.write(f"• Razón Social: {cliente_seleccionado.razon_social}")
+            st.write(f"• CIF: {cliente_seleccionado.cif}")
+            st.write(f"• Representante: {cliente_seleccionado.nombre_representante_legal}")
+            st.write(f"• DNI: {cliente_seleccionado.dni_representante}")
+        with col2:
+            st.markdown("**Contacto**")
+            st.write(f"• Email: {cliente_seleccionado.correo_electronico}")
+            st.write(f"• Dirección: {cliente_seleccionado.direccion}")
+            st.write(f"• Trabajadores: {cliente_seleccionado.numero_trabajadores}")
+            st.write(f"• Facturación: {cliente_seleccionado.facturacion} €")
+
+    st.markdown("---")
+
+    # PASO 2: Subir formulario
+    st.subheader("2️⃣ Sube el Formulario Vacío")
 
     # Subir formulario
     formulario = st.file_uploader(
@@ -361,6 +503,9 @@ def pagina_rellenar_documentos():
 
                     st.success(f"✅ {resultado['mensaje']}")
 
+                    st.markdown("---")
+                    st.subheader("3️⃣ Descarga tu Documento")
+
                     # Subir a Cloudinary si está configurado
                     cloudinary_url = None
                     if st.session_state.cloudinary_storage:
@@ -372,28 +517,36 @@ def pagina_rellenar_documentos():
                                     folder="soporte_admin/generated"
                                 )
                                 cloudinary_url = resultado_upload['url']
-                                st.info(f"📤 Documento guardado en la nube")
                         except Exception as e:
                             st.warning(f"No se pudo subir a Cloudinary: {e}")
 
                     # Mostrar análisis si existe
                     if 'analisis' in resultado:
-                        with st.expander("Ver análisis del documento"):
+                        with st.expander("📊 Ver análisis del documento"):
                             st.json(resultado['analisis'])
 
                     # Botón de descarga
                     with open(output_path, 'rb') as f:
                         contenido = f.read()
-                        st.download_button(
-                            label="📥 Descargar Documento Rellenado",
-                            data=contenido,
-                            file_name=output_nombre,
-                            mime='application/pdf' if extension == 'pdf' else 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
-                        )
+
+                        col1, col2 = st.columns([2, 1])
+                        with col1:
+                            st.download_button(
+                                label="📥 Descargar Documento Rellenado",
+                                data=contenido,
+                                file_name=output_nombre,
+                                mime='application/pdf' if extension == 'pdf' else 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                                type="primary",
+                                use_container_width=True
+                            )
 
                     # Si está en Cloudinary, mostrar también el link
                     if cloudinary_url:
-                        st.markdown(f"🔗 [Ver documento en la nube]({cloudinary_url})")
+                        st.success("📤 Documento guardado en Cloudinary")
+                        st.markdown(f"🔗 **Link permanente:** [Abrir en la nube]({cloudinary_url})")
+                        st.caption("Este link estará disponible permanentemente en Cloudinary")
+
+                    st.info("ℹ️ Los archivos temporales se eliminan automáticamente del servidor después de la descarga")
 
                     # Limpiar archivos temporales
                     try:
@@ -439,7 +592,7 @@ def main():
     # Menú de navegación
     pagina = st.sidebar.radio(
         "Selecciona una opción:",
-        ["🏠 Inicio", "📥 Extraer Datos", "👥 Gestionar Clientes", "📝 Rellenar Documentos"]
+        ["🏠 Inicio", "👥 Gestionar Clientes", "📝 Rellenar Documentos"]
     )
 
     # Información de configuración
@@ -467,8 +620,6 @@ def main():
     # Renderizar página seleccionada
     if pagina == "🏠 Inicio":
         pagina_inicio()
-    elif pagina == "📥 Extraer Datos":
-        pagina_extraer_datos()
     elif pagina == "👥 Gestionar Clientes":
         pagina_gestionar_clientes()
     elif pagina == "📝 Rellenar Documentos":
