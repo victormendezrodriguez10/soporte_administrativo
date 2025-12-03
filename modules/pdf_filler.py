@@ -205,32 +205,76 @@ IMPORTANTE:
 
     def rellenar_pdf_con_ia(self, pdf_path: str, datos_cliente: Dict, output_path: str):
         """
-        Rellena un PDF no interactivo usando IA para identificar campos
+        Rellena un PDF no interactivo usando IA para identificar campos y reportlab para escribir
 
         Args:
             pdf_path: Ruta al PDF formulario
             datos_cliente: Datos del cliente
             output_path: Ruta de salida
         """
-        # Primero analizar el formulario
+        from reportlab.pdfgen import canvas
+        from reportlab.lib.pagesizes import letter
+        import io
+
+        # Primero analizar el formulario con IA
         analisis = self.analizar_formulario_pdf(pdf_path, datos_cliente)
 
         # Leer el PDF original
         reader = PdfReader(pdf_path)
         writer = PdfWriter()
 
-        # Este es un método simplificado
-        # En producción, se necesitaría una biblioteca más avanzada como pdf-annotate
-        # o generar overlays con las posiciones exactas
+        # Procesar cada página
+        for page_num, page in enumerate(reader.pages):
+            # Crear un canvas en memoria para el overlay
+            packet = io.BytesIO()
 
-        print("ANÁLISIS DEL FORMULARIO:")
-        print(json.dumps(analisis, indent=2, ensure_ascii=False))
+            # Obtener dimensiones de la página
+            page_width = float(page.mediabox.width)
+            page_height = float(page.mediabox.height)
 
-        # Por ahora, copiar el PDF original
-        # TODO: Implementar overlay de texto en las posiciones identificadas
-        for page in reader.pages:
+            can = canvas.Canvas(packet, pagesize=(page_width, page_height))
+            can.setFont("Helvetica", 10)
+
+            # Dibujar los campos según el análisis de IA
+            if 'campos' in analisis:
+                for campo in analisis['campos']:
+                    if campo.get('pagina', 1) == page_num + 1:
+                        valor = campo.get('valor', '')
+
+                        # Posición aproximada basada en la zona
+                        zona = campo.get('zona', 'media izquierda').lower()
+
+                        # Calcular posiciones aproximadas
+                        if 'superior' in zona:
+                            y = page_height * 0.75
+                        elif 'inferior' in zona:
+                            y = page_height * 0.25
+                        else:  # media
+                            y = page_height * 0.5
+
+                        if 'izquierda' in zona:
+                            x = page_width * 0.2
+                        elif 'derecha' in zona:
+                            x = page_width * 0.7
+                        else:  # centro
+                            x = page_width * 0.5
+
+                        # Escribir el valor
+                        can.drawString(x, y, str(valor))
+
+            can.save()
+
+            # Mover al principio del buffer
+            packet.seek(0)
+
+            # Leer el overlay
+            overlay_pdf = PdfReader(packet)
+
+            # Fusionar con la página original
+            page.merge_page(overlay_pdf.pages[0])
             writer.add_page(page)
 
+        # Guardar el PDF resultante
         with open(output_path, 'wb') as f:
             writer.write(f)
 
@@ -256,11 +300,11 @@ IMPORTANTE:
                 'mensaje': 'PDF rellenado exitosamente (formulario interactivo)'
             }
         else:
-            # Si no es interactivo, usar IA
+            # Si no es interactivo, usar IA + reportlab
             analisis = self.rellenar_pdf_con_ia(pdf_path, datos_cliente, output_path)
             return {
                 'exito': True,
-                'metodo': 'ia_analisis',
-                'mensaje': 'PDF analizado con IA. Requiere implementación manual de overlay.',
+                'metodo': 'ia_overlay',
+                'mensaje': 'PDF rellenado con IA (las posiciones son aproximadas - verifica el resultado)',
                 'analisis': analisis
             }
